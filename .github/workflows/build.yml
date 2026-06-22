@@ -1,0 +1,118 @@
+name: Build WebView APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL del sitio web'
+        required: true
+      app_name:
+        description: 'Nombre de la app'
+        required: true
+        default: 'Mi App'
+      package_name:
+        description: 'ID del paquete (ej: com.miempresa.app)'
+        required: true
+        default: 'com.miapp.app'
+      icon_base64:
+        description: 'Ícono en base64 (opcional)'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Reemplazar URL en MainActivity
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          sed -i "s|URL_PLACEHOLDER|${URL}|g" \
+            app/src/main/java/com/webtoapp/app/MainActivity.java
+
+      - name: Reemplazar nombre de la app
+        run: |
+          NAME="${{ github.event.inputs.app_name }}"
+          sed -i "s|APP_NAME_PLACEHOLDER|${NAME}|g" \
+            app/src/main/res/values/strings.xml
+
+      - name: Reemplazar ID del paquete
+        env:
+          PKG: ${{ github.event.inputs.package_name }}
+        run: |
+          sed -i "s|com\.webtoapp\.app|${PKG}|g" app/src/main/AndroidManifest.xml
+          sed -i "s|com\.webtoapp\.app|${PKG}|g" app/build.gradle
+          sed -i "s|package com.webtoapp.app|package ${PKG}|g" \
+            app/src/main/java/com/webtoapp/app/MainActivity.java
+          PKG_PATH=$(echo "${PKG}" | tr '.' '/')
+          mkdir -p "app/src/main/java/${PKG_PATH}"
+          cp app/src/main/java/com/webtoapp/app/MainActivity.java \
+             "app/src/main/java/${PKG_PATH}/MainActivity.java" 2>/dev/null || true
+
+      - name: Procesar ícono personalizado
+        if: ${{ github.event.inputs.icon_base64 != '' }}
+        env:
+          ICON_B64: ${{ github.event.inputs.icon_base64 }}
+        run: |
+          pip3 install Pillow -q
+          python3 << 'PYEOF'
+          import os, base64
+          data = os.environ.get('ICON_B64', '')
+          if ',' in data:
+              data = data.split(',')[1]
+          rem = len(data) % 4
+          if rem:
+              data += '=' * (4 - rem)
+          try:
+              img_bytes = base64.b64decode(data)
+              with open('/tmp/icon.png', 'wb') as f:
+                  f.write(img_bytes)
+              from PIL import Image
+              img = Image.open('/tmp/icon.png').convert('RGBA')
+              sizes = {
+                  'app/src/main/res/mipmap-mdpi': 48,
+                  'app/src/main/res/mipmap-hdpi': 72,
+                  'app/src/main/res/mipmap-xhdpi': 96,
+                  'app/src/main/res/mipmap-xxhdpi': 144,
+                  'app/src/main/res/mipmap-xxxhdpi': 192,
+              }
+              for folder, size in sizes.items():
+                  resized = img.resize((size, size), Image.LANCZOS)
+                  resized.save(f'{folder}/ic_launcher.png')
+                  resized.save(f'{folder}/ic_launcher_round.png')
+              print('Íconos generados correctamente')
+          except Exception as e:
+              print(f'Advertencia: {e}')
+          PYEOF
+
+      - name: Generar Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.4 --distribution-type bin
+
+      - name: Compilar APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Subir APK como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.app_name }}-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+          if-no-files-found: error
