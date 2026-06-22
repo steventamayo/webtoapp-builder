@@ -46,30 +46,33 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
 
-                if (url.startsWith("whatsapp://") || url.contains("wa.me") || url.contains("api.whatsapp.com")) {
+                // WhatsApp: wa.me, whatsapp://, api.whatsapp.com
+                if (url.startsWith("whatsapp://") || url.contains("wa.me")
+                        || url.contains("api.whatsapp.com")) {
                     try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        startActivity(intent);
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                     } catch (Exception e) {
-                        Toast.makeText(MainActivity.this, "WhatsApp no instalado", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this,
+                            "WhatsApp no instalado", Toast.LENGTH_SHORT).show();
                     }
                     return true;
                 }
 
+                // intent://
                 if (url.startsWith("intent://")) {
                     try {
                         Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
                         if (intent != null) startActivity(intent);
-                    } catch (Exception e) { /* ignorar */ }
+                    } catch (Exception ignored) {}
                     return true;
                 }
 
-                if (url.startsWith("tel:") || url.startsWith("mailto:") ||
-                    url.startsWith("sms:") || url.startsWith("market:")) {
+                // tel, mailto, sms, market
+                if (url.startsWith("tel:") || url.startsWith("mailto:")
+                        || url.startsWith("sms:") || url.startsWith("market:")) {
                     try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        startActivity(intent);
-                    } catch (Exception e) { /* ignorar */ }
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                    } catch (Exception ignored) {}
                     return true;
                 }
 
@@ -93,28 +96,27 @@ public class MainActivity extends Activity {
 
     public static class ShareInterface {
         private final Activity activity;
-        ShareInterface(Activity activity) { this.activity = activity; }
+        ShareInterface(Activity a) { this.activity = a; }
 
         @android.webkit.JavascriptInterface
         public void shareText(String text, String url) {
-            Intent shareIntent = new Intent(Intent.ACTION_SEND);
-            shareIntent.setType("text/plain");
-            shareIntent.putExtra(Intent.EXTRA_TEXT, text + (url != null ? "\n" + url : ""));
-            activity.startActivity(Intent.createChooser(shareIntent, "Compartir via..."));
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType("text/plain");
+            i.putExtra(Intent.EXTRA_TEXT, text + (url != null ? "\n" + url : ""));
+            activity.startActivity(Intent.createChooser(i, "Compartir via..."));
         }
 
         @android.webkit.JavascriptInterface
         public void shareToWhatsApp(String text) {
             try {
-                Intent intent = new Intent(Intent.ACTION_SEND);
-                intent.setType("text/plain");
-                intent.setPackage("com.whatsapp");
-                intent.putExtra(Intent.EXTRA_TEXT, text);
-                activity.startActivity(intent);
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.setPackage("com.whatsapp");
+                i.putExtra(Intent.EXTRA_TEXT, text);
+                activity.startActivity(i);
             } catch (Exception e) {
-                Intent intent = new Intent(Intent.ACTION_VIEW,
-                    Uri.parse("https://wa.me/?text=" + Uri.encode(text)));
-                activity.startActivity(intent);
+                activity.startActivity(new Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://wa.me/?text=" + Uri.encode(text))));
             }
         }
     }
