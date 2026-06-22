@@ -22,7 +22,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Clonar repositorio
         uses: actions/checkout@v4
@@ -33,17 +32,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Descargar e instalar Gradle 7.6.4
+      - name: Descargar Gradle 7.6.4
         run: |
-          wget -q https://services.gradle.org/distributions/gradle-7.6.4-bin.zip -O /tmp/gradle.zip
-          sudo unzip -q /tmp/gradle.zip -d /opt/
-          echo "/opt/gradle-7.6.4/bin" >> $GITHUB_PATH
+          wget -q https://services.gradle.org/distributions/gradle-7.6.4-bin.zip -O /tmp/g.zip
+          sudo unzip -q /tmp/g.zip -d /opt/
+          echo "GRADLE=/opt/gradle-7.6.4/bin/gradle" >> $GITHUB_ENV
 
       - name: Configurar Android SDK
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" "build-tools;33.0.2" 2>/dev/null || true
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Configurar valores de la app
         env:
@@ -53,28 +49,32 @@ jobs:
         run: |
           JAVA_SRC="app/src/main/java/com/webtoapp/app/MainActivity.java"
 
+          # 1. Reemplazar URL y nombre
           sed -i "s|URL_PLACEHOLDER|${URL}|g" "$JAVA_SRC"
           sed -i "s|APP_NAME_PLACEHOLDER|${NAME}|g" app/src/main/res/values/strings.xml
-          sed -i "s|com\.webtoapp\.app|${PKG}|g" app/src/main/AndroidManifest.xml
-          sed -i "s|applicationId \"com\.webtoapp\.app\"|applicationId \"${PKG}\"|g" app/build.gradle
-          sed -i "s|namespace \"com\.webtoapp\.app\"|namespace \"${PKG}\"|g" app/build.gradle
-          sed -i "s|^package com\.webtoapp\.app|package ${PKG}|g" "$JAVA_SRC"
 
+          # 2. Reemplazar package en TODOS los archivos (sin importar tipo de comillas)
+          sed -i "s|com\.webtoapp\.app|${PKG}|g" app/src/main/AndroidManifest.xml
+          sed -i "s|com\.webtoapp\.app|${PKG}|g" app/build.gradle
+          sed -i "s|com\.webtoapp\.app|${PKG}|g" "$JAVA_SRC"
+
+          # 3. Mover Java al path correcto (mv evita "duplicate class" error)
           PKG_PATH=$(echo "${PKG}" | tr '.' '/')
           mkdir -p "app/src/main/java/${PKG_PATH}"
-          cp "$JAVA_SRC" "app/src/main/java/${PKG_PATH}/MainActivity.java"
-          echo "Configurado: paquete=${PKG} path=${PKG_PATH}"
+          if [ "com/webtoapp/app" != "${PKG_PATH}" ]; then
+            mv "$JAVA_SRC" "app/src/main/java/${PKG_PATH}/MainActivity.java"
+          fi
+
+          echo "OK: paquete=${PKG} path=app/src/main/java/${PKG_PATH}"
 
       - name: Crear carpetas de iconos y generar iconos
         env:
           ICON_B64: ${{ github.event.inputs.icon_base64 }}
         run: |
-          # Crear los directorios mipmap (NECESARIO — no existen en el repo)
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
+          # Crear directorios mipmap (no existen en el repo)
+          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
+            mkdir -p "app/src/main/res/$d"
+          done
 
           pip3 install Pillow -q
           python3 << 'PYEOF'
@@ -82,11 +82,8 @@ import os
 from PIL import Image, ImageDraw
 
 SIZES = [
-    ('mipmap-mdpi', 48),
-    ('mipmap-hdpi', 72),
-    ('mipmap-xhdpi', 96),
-    ('mipmap-xxhdpi', 144),
-    ('mipmap-xxxhdpi', 192),
+    ('mipmap-mdpi', 48), ('mipmap-hdpi', 72),
+    ('mipmap-xhdpi', 96), ('mipmap-xxhdpi', 144), ('mipmap-xxxhdpi', 192),
 ]
 
 icon_b64 = os.environ.get('ICON_B64', '').strip()
@@ -101,60 +98,37 @@ if icon_b64:
     if rem:
         data += '=' * (4 - rem)
     try:
-        img_bytes = base64.b64decode(data)
         with open('/tmp/icon_input.png', 'wb') as f:
-            f.write(img_bytes)
+            f.write(base64.b64decode(data))
         base_img = Image.open('/tmp/icon_input.png').convert('RGBA')
-        print('Icono personalizado cargado OK')
+        print('Icono personalizado cargado')
     except Exception as e:
-        print(f'Error cargando icono personalizado ({e}), usando naranja')
+        print(f'Error icono custom: {e}')
 
 for folder, size in SIZES:
-    # Asegurar que el directorio existe
     os.makedirs(f'app/src/main/res/{folder}', exist_ok=True)
-
     if base_img is not None:
         img = base_img.resize((size, size), Image.LANCZOS)
     else:
-        # Icono naranja con borde blanco por defecto
         img = Image.new('RGBA', (size, size), (255, 77, 28, 255))
         draw = ImageDraw.Draw(img)
         pad = size // 5
-        draw.rectangle(
-            [pad, pad, size - pad, size - pad],
-            outline=(255, 255, 255, 220),
-            width=max(2, size // 18),
-        )
+        draw.rectangle([pad, pad, size - pad, size - pad],
+            outline=(255, 255, 255, 200), width=max(2, size // 18))
     img.save(f'app/src/main/res/{folder}/ic_launcher.png')
     img.save(f'app/src/main/res/{folder}/ic_launcher_round.png')
-    print(f'  {folder}: {size}x{size}px OK')
+    print(f'  {folder} ({size}px) OK')
 
-print('Todos los iconos generados correctamente')
+print('Iconos generados correctamente')
 PYEOF
 
-      - name: Verificar estructura del proyecto
-        run: |
-          echo "=== Estructura del proyecto ==="
-          find app -name "*.java" -o -name "*.xml" -o -name "*.gradle" | sort
-          echo "=== Iconos generados ==="
-          find app -name "ic_launcher*.png" | sort
-          echo "=== local.properties ==="
-          cat local.properties
+      - name: Compilar APK
+        run: $GRADLE :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Compilar APK con Gradle
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-
-      - name: Verificar APK generado
+      - name: Verificar APK
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          if [ -f "$APK" ]; then
-            SIZE=$(du -h "$APK" | cut -f1)
-            echo "APK listo: $APK ($SIZE)"
-          else
-            echo "ERROR: APK no encontrado"
-            find . -name "*.apk" 2>/dev/null || echo "No hay APKs"
-            exit 1
-          fi
+          [ -f "$APK" ] && echo "OK: $(du -h $APK)" || (echo "ERROR: APK no encontrado" && find . -name "*.apk" && exit 1)
 
       - name: Subir APK
         uses: actions/upload-artifact@v4
