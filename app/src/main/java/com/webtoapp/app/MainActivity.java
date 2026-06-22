@@ -96,14 +96,6 @@ public class MainActivity extends Activity {
         ShareInterface(Activity a) { this.activity = a; }
 
         @android.webkit.JavascriptInterface
-        public void shareText(String text, String url) {
-            Intent i = new Intent(Intent.ACTION_SEND);
-            i.setType("text/plain");
-            i.putExtra(Intent.EXTRA_TEXT, text + (url != null ? "\n" + url : ""));
-            activity.startActivity(Intent.createChooser(i, "Compartir via..."));
-        }
-
-        @android.webkit.JavascriptInterface
         public void shareToWhatsApp(String text) {
             try {
                 Intent i = new Intent(Intent.ACTION_SEND);
