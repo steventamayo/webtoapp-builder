@@ -46,7 +46,6 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
 
-                // WhatsApp: wa.me, whatsapp://, api.whatsapp.com
                 if (url.startsWith("whatsapp://") || url.contains("wa.me")
                         || url.contains("api.whatsapp.com")) {
                     try {
@@ -58,7 +57,6 @@ public class MainActivity extends Activity {
                     return true;
                 }
 
-                // intent://
                 if (url.startsWith("intent://")) {
                     try {
                         Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
@@ -67,7 +65,6 @@ public class MainActivity extends Activity {
                     return true;
                 }
 
-                // tel, mailto, sms, market
                 if (url.startsWith("tel:") || url.startsWith("mailto:")
                         || url.startsWith("sms:") || url.startsWith("market:")) {
                     try {
