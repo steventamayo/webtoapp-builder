@@ -17,6 +17,7 @@ on:
       icon_base64:
         description: 'Ícono en base64 (opcional)'
         required: false
+        default: ''
 
 jobs:
   build:
@@ -32,82 +33,113 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Instalar Gradle
+      - name: Instalar Gradle 8.4
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Apuntar al Android SDK pre-instalado
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Reemplazar URL en MainActivity
-        run: |
-          URL="${{ github.event.inputs.url }}"
-          sed -i "s|URL_PLACEHOLDER|${URL}|g" \
-            app/src/main/java/com/webtoapp/app/MainActivity.java
+      - name: Aceptar licencias del SDK
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Reemplazar nombre de la app
-        run: |
-          NAME="${{ github.event.inputs.app_name }}"
-          sed -i "s|APP_NAME_PLACEHOLDER|${NAME}|g" \
-            app/src/main/res/values/strings.xml
-
-      - name: Reemplazar ID del paquete
+      - name: Configurar valores de la app
         env:
+          URL: ${{ github.event.inputs.url }}
+          NAME: ${{ github.event.inputs.app_name }}
           PKG: ${{ github.event.inputs.package_name }}
         run: |
+          JAVA_SRC="app/src/main/java/com/webtoapp/app/MainActivity.java"
+
+          # 1. URL
+          sed -i "s|URL_PLACEHOLDER|${URL}|g" "$JAVA_SRC"
+
+          # 2. Nombre
+          sed -i "s|APP_NAME_PLACEHOLDER|${NAME}|g" app/src/main/res/values/strings.xml
+
+          # 3. Package en AndroidManifest
           sed -i "s|com\.webtoapp\.app|${PKG}|g" app/src/main/AndroidManifest.xml
-          sed -i "s|com\.webtoapp\.app|${PKG}|g" app/build.gradle
-          sed -i "s|package com.webtoapp.app|package ${PKG}|g" \
-            app/src/main/java/com/webtoapp/app/MainActivity.java
+
+          # 4. applicationId y namespace en build.gradle (por separado)
+          sed -i "s|applicationId "com\.webtoapp\.app"|applicationId "${PKG}"|g" app/build.gradle
+          sed -i "s|namespace "com\.webtoapp\.app"|namespace "${PKG}"|g" app/build.gradle
+
+          # 5. Package declaration en Java
+          sed -i "s|^package com\.webtoapp\.app|package ${PKG}|g" "$JAVA_SRC"
+
+          # 6. Mover archivo Java al path correcto del paquete
           PKG_PATH=$(echo "${PKG}" | tr '.' '/')
           mkdir -p "app/src/main/java/${PKG_PATH}"
-          cp app/src/main/java/com/webtoapp/app/MainActivity.java \
-             "app/src/main/java/${PKG_PATH}/MainActivity.java" 2>/dev/null || true
+          cp "$JAVA_SRC" "app/src/main/java/${PKG_PATH}/MainActivity.java"
 
-      - name: Procesar ícono personalizado
-        if: ${{ github.event.inputs.icon_base64 != '' }}
+      - name: Generar íconos (custom o naranja por defecto)
         env:
           ICON_B64: ${{ github.event.inputs.icon_base64 }}
         run: |
           pip3 install Pillow -q
           python3 << 'PYEOF'
-          import os, base64
-          data = os.environ.get('ICON_B64', '')
-          if ',' in data:
-              data = data.split(',')[1]
-          rem = len(data) % 4
-          if rem:
-              data += '=' * (4 - rem)
-          try:
-              img_bytes = base64.b64decode(data)
-              with open('/tmp/icon.png', 'wb') as f:
-                  f.write(img_bytes)
-              from PIL import Image
-              img = Image.open('/tmp/icon.png').convert('RGBA')
-              sizes = {
-                  'app/src/main/res/mipmap-mdpi': 48,
-                  'app/src/main/res/mipmap-hdpi': 72,
-                  'app/src/main/res/mipmap-xhdpi': 96,
-                  'app/src/main/res/mipmap-xxhdpi': 144,
-                  'app/src/main/res/mipmap-xxxhdpi': 192,
-              }
-              for folder, size in sizes.items():
-                  resized = img.resize((size, size), Image.LANCZOS)
-                  resized.save(f'{folder}/ic_launcher.png')
-                  resized.save(f'{folder}/ic_launcher_round.png')
-              print('Íconos generados correctamente')
-          except Exception as e:
-              print(f'Advertencia: {e}')
+          import os, sys
+          from PIL import Image, ImageDraw
+
+          sizes = [
+              ('mipmap-mdpi', 48), ('mipmap-hdpi', 72),
+              ('mipmap-xhdpi', 96), ('mipmap-xxhdpi', 144),
+              ('mipmap-xxxhdpi', 192),
+          ]
+
+          icon_b64 = os.environ.get('ICON_B64', '').strip()
+          base_img = None
+
+          if icon_b64:
+              import base64
+              data = icon_b64
+              if ',' in data:
+                  data = data.split(',')[1]
+              rem = len(data) % 4
+              if rem:
+                  data += '=' * (4 - rem)
+              try:
+                  img_bytes = base64.b64decode(data)
+                  with open('/tmp/icon.png', 'wb') as f:
+                      f.write(img_bytes)
+                  base_img = Image.open('/tmp/icon.png').convert('RGBA')
+                  print('Ícono personalizado cargado correctamente')
+              except Exception as e:
+                  print(f'No se pudo cargar el ícono custom ({e}), usando naranja por defecto')
+
+          for folder, size in sizes:
+              if base_img is not None:
+                  img = base_img.resize((size, size), Image.LANCZOS)
+              else:
+                  # Ícono naranja por defecto con "W"
+                  img = Image.new('RGBA', (size, size), (255, 77, 28, 255))
+                  draw = ImageDraw.Draw(img)
+                  pad = size // 5
+                  draw.rectangle(
+                      [pad, pad, size - pad, size - pad],
+                      outline=(255, 255, 255, 220),
+                      width=max(2, size // 18),
+                  )
+              img.save(f'app/src/main/res/{folder}/ic_launcher.png')
+              img.save(f'app/src/main/res/{folder}/ic_launcher_round.png')
+
+          print('Todos los íconos generados correctamente')
           PYEOF
 
-      - name: Generar Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.4 --distribution-type bin
+      - name: Compilar APK (debug)
+        run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Compilar APK
+      - name: Verificar APK generado
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK" ]; then
+            SIZE=$(du -h "$APK" | cut -f1)
+            echo "APK generado: $APK ($SIZE)"
+          else
+            echo "ERROR: No se encontró el APK"
+            exit 1
+          fi
 
       - name: Subir APK como artefacto
         uses: actions/upload-artifact@v4
