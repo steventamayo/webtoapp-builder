@@ -40,13 +40,9 @@ jobs:
           APP_NAME: ${{ github.event.inputs.app_name }}
           APP_PKG: ${{ github.event.inputs.package_name }}
         run: |
-          # Replace URL, name and package everywhere
           find app/src -type f | xargs -I{} sed -i "s|URL_PLACEHOLDER|${APP_URL}|g" {} 2>/dev/null || true
           find app/src -type f | xargs -I{} sed -i "s|APP_NAME_PLACEHOLDER|${APP_NAME}|g" {} 2>/dev/null || true
-          find app -type f \( -name "*.java" -o -name "*.xml" -o -name "*.gradle" \) \
-            | xargs -I{} sed -i "s|com\.webtoapp\.app|${APP_PKG}|g" {} 2>/dev/null || true
-
-          # Move Java file to correct package path
+          find app -type f -name "*.java" -o -name "*.xml" -o -name "*.gradle" | xargs -I{} sed -i "s|com\.webtoapp\.app|${APP_PKG}|g" {} 2>/dev/null || true
           PKG_PATH=$(echo "${APP_PKG}" | tr '.' '/')
           mkdir -p "app/src/main/java/${PKG_PATH}"
           SRC="app/src/main/java/com/webtoapp/app/MainActivity.java"
@@ -58,38 +54,7 @@ jobs:
           ICON_B64: ${{ github.event.inputs.icon_base64 }}
         run: |
           pip3 install Pillow -q
-          python3 - << 'PYEOF'
-import os, io, base64
-from PIL import Image, ImageDraw
-
-SIZES = [('mipmap-mdpi',48),('mipmap-hdpi',72),('mipmap-xhdpi',96),
-         ('mipmap-xxhdpi',144),('mipmap-xxxhdpi',192)]
-
-raw = os.environ.get('ICON_B64','').strip()
-base = None
-if raw:
-    try:
-        data = raw.split(',')[-1]
-        data += '=' * (-len(data) % 4)
-        base = Image.open(io.BytesIO(base64.b64decode(data))).convert('RGBA')
-        print('Custom icon loaded')
-    except Exception as e:
-        print(f'Custom icon error ({e}), using default orange')
-
-for folder, size in SIZES:
-    os.makedirs(f'app/src/main/res/{folder}', exist_ok=True)
-    if base:
-        img = base.resize((size, size), Image.LANCZOS)
-    else:
-        img = Image.new('RGBA', (size, size), (255, 77, 28, 255))
-        d = ImageDraw.Draw(img)
-        p = size // 5
-        d.rectangle([p, p, size-p, size-p], outline=(255,255,255,200), width=max(2,size//18))
-    img.save(f'app/src/main/res/{folder}/ic_launcher.png')
-    img.save(f'app/src/main/res/{folder}/ic_launcher_round.png')
-
-print(f'Icons generated for {len(SIZES)} densities')
-PYEOF
+          python3 scripts/gen_icons.py
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
@@ -97,7 +62,7 @@ PYEOF
       - name: Verify APK exists
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          [ -f "$APK" ] && echo "✅ APK OK: $(du -h $APK | cut -f1)" || (echo "❌ APK not found" && exit 1)
+          [ -f "$APK" ] && echo "APK OK: $(du -h $APK | cut -f1)" || (echo "APK not found" && exit 1)
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
